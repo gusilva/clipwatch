@@ -104,9 +104,12 @@ Pick one:
 
 `version` in `herdr-plugin.toml` is the only place where the version is written. `./build.sh` copies it into `Clipwatch.app/Contents/Info.plist` as `CFBundleShortVersionString`, and sets `CFBundleVersion` to the number of commits in the git history (`1` if git history is not available). `app/Info.plist` holds the placeholder `0.0.0`, so do not edit versions there.
 
+Changes are listed in `CHANGELOG.md`, newest first, with a heading `## X.Y.Z - YYYY-MM-DD` per version and the sections Added, Changed, Fixed or Internal. `scripts/release.sh` does not touch it, so write the entry for the new version by hand and commit it **before** you run the script.
+
 A git tag cannot change files, so the version is bumped first and the tag is made from that commit. `scripts/release.sh` does both:
 
 ```sh
+# 1. add "## 0.3.0 - 2026-10-12" to CHANGELOG.md and commit it
 scripts/release.sh 0.3.0        # sets version, commits "chore(release): v0.3.0", tags v0.3.0
 git push && git push origin v0.3.0
 ```
