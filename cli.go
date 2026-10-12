@@ -36,8 +36,9 @@ func main() {
 	case "agent":
 		if len(os.Args) == 3 && os.Args[2] == "remove" {
 			removeAgent()
+		} else {
+			installAgent()
 		}
-
 	default:
 		usage()
 	}

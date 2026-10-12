@@ -1,32 +1,36 @@
 id = "gusilva.clipwatch"
 name = "Clipwatch"
-version = "0.0.1"
+version = "0.3.0"
 min_herdr_version = "0.9.3"
 description = "macOS clipboard history in a herdr popup"
 platforms = ["macos"]
 
+# Runs on `herdr plugin install` (from GitHub). NOT on `plugin link`.
+# Needs Go and the Xcode Command Line Tools (swiftc, cgo).
 [[build]]
 command = ["./build.sh"]
 
-# Runs once each time the herdr server starts: hands the watcher to launchd, then exits.
+# Runs once each time the herdr server starts: makes sure macOS runs the watcher, then exits.
 [[startup]]
-command = ["./bin/clipwatch", "agent"]
+command = ["./Clipwatch.app/Contents/MacOS/clipwatch", "agent"]
 
+# Bind to a key: asks herdr to open the picker.
 [[actions]]
 id = "open"
 title = "Clipboard history"
-command = ["./bin/clipwatch", "open"]
- 
+command = ["./Clipwatch.app/Contents/MacOS/clipwatch", "open"]
+
+# Run before `herdr plugin uninstall`: stops the watcher and removes it from Login Items.
 [[actions]]
 id = "remove-watcher"
 title = "Stop and remove the clipboard watcher"
-command = ["./bin/clipwatch", "agent", "remove"]
+command = ["./Clipwatch.app/Contents/MacOS/clipwatch", "agent", "remove"]
 
+# The picker itself, shown as a floating popup.
 [[panes]]
 id = "picker"
 title = "Clipboard"
 placement = "popup"
 width = "20%"
 height = "40%"
-command = ["./bin/clipwatch", "pick"]
-
+command = ["./Clipwatch.app/Contents/MacOS/clipwatch", "pick"]

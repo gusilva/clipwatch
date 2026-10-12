@@ -3,7 +3,9 @@
 package main
 
 import (
+	"io"
 	"log/slog"
+	"os"
 	"time"
 	"unicode/utf8"
 )
@@ -42,6 +44,12 @@ func watch() {
 	}
 
 	slog.Info("watching clipboard", "history", path, "entries", len(h.Entries))
+	logf, err := openLog()
+	if err != nil {
+		fatal("open log", "err", err)
+	}
+	defer func() { _ = logf.Close() }()
+	slog.SetDefault(slog.New(slog.NewTextHandler(io.MultiWriter(os.Stderr, logf), nil)))
 
 	last := changeCount()
 
