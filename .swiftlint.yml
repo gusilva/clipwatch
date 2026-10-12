@@ -1,0 +1,9 @@
+included:
+  - swift
+
+opt_in_rules:
+  - missing_docs
+  - orphaned_doc_comment
+
+identifier_name:
+  min_length: 1

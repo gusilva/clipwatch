@@ -119,7 +119,23 @@ Check the installed version:
 /usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" Clipwatch.app/Contents/Info.plist
 ```
 
-## 7. Troubleshooting
+## 7. Checks
+
+```sh
+scripts/check.sh
+```
+
+Runs `sh -n` on the scripts, `golangci-lint`, `swiftlint`, a check for stale paths in the docs, `./build.sh` and `go test`. A pre-commit hook and the GitHub Actions workflow in `.github/workflows/check.yml` run it too.
+
+After cloning, enable the hook once:
+
+```sh
+git config core.hooksPath .githooks
+```
+
+Needs `golangci-lint` and `swiftlint` (`brew install golangci-lint swiftlint`).
+
+## 8. Troubleshooting
 
 **`swiftc: command not found`, `codesign: command not found`, or `xcrun: error` during the build**
 Install the tools with `xcode-select --install`. If they are installed but not selected, run `sudo xcode-select --switch /Library/Developer/CommandLineTools`.

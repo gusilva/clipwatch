@@ -1,0 +1,42 @@
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - govet
+    - errcheck
+    - staticcheck
+    - unused
+    - revive
+    - godot
+    - gocritic
+    - forbidigo
+    - sloglint
+  settings:
+    revive:
+      rules:
+        - name: exported
+        - name: package-comments
+    gocritic:
+      enabled-checks:
+        - commentedOutCode
+    forbidigo:
+      forbid:
+        - pattern: ^log\.(Fatal|Panic|Print)
+          msg: use log/slog; fatal() in log.go logs and exits
+        - pattern: ^fmt\.(Print|Fprint)
+          msg: use log/slog; command output belongs in cli.go
+    sloglint:
+      no-mixed-args: true
+      attr-only: false
+      key-naming-case: snake
+  exclusions:
+    rules:
+      - path: cli\.go
+        linters: [forbidigo]
+      - path: _test\.go
+        linters: [forbidigo, revive]
+
+formatters:
+  enable:
+    - gofmt

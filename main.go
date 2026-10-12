@@ -48,7 +48,7 @@ func watch() {
 	if err != nil {
 		fatal("open log", "err", err)
 	}
-	defer logf.Close()
+	defer func() { _ = logf.Close() }()
 	slog.SetDefault(slog.New(slog.NewTextHandler(io.MultiWriter(os.Stderr, logf), nil)))
 
 	last := changeCount()

@@ -53,12 +53,12 @@ func (h *History) Save(path string) error {
 	if err != nil {
 		return err
 	}
-	defer os.Remove(tmp.Name())
+	defer func() { _ = os.Remove(tmp.Name()) }()
 
 	enc := json.NewEncoder(tmp)
 	enc.SetIndent("", "  ")
 	if err := enc.Encode(h); err != nil {
-		tmp.Close()
+		_ = tmp.Close()
 		return err
 	}
 
