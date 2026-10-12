@@ -1,31 +1,56 @@
 #!/bin/sh
 #
-# build.sh - build the clipwatch binary, including its Swift pasteboard library.
+# build.sh - build Clipwatch.app, the signed app bundle that holds clipwatch.
 #
 # Usage:
 #   ./build.sh
 #
 # Description:
-#   The clipboard code is written in Swift (swift/pasteboard.swift), but the Go
-#   toolchain compiles only Go, C and Objective-C, so a plain "go build" fails
-#   at link time. This script:
-#     1. compiles the Swift source into build/libpasteboard.a, which cgo links
-#        (see pasteboard.go);
-#     2. builds the Go binary into bin/clipwatch.
-#   herdr's [[build]] entry in herdr-plugin.toml runs a single command, so it
-#   runs this script.
+#   Go compiles only Go, C and Objective-C, so the Swift code is built first.
+#   The script:
+#     1. compiles swift/*.swift into build/libpasteboard.a, which cgo links;
+#     2. builds the Go binary into the bundle;
+#     3. copies Info.plist, the watcher launchd plist and the icon from app/;
+#     4. writes the version into the bundle's Info.plist (see Versioning);
+#     5. signs the bundle ad hoc, which macOS requires.
+#   herdr runs this script through the [[build]] entry in herdr-plugin.toml.
+#
+# Versioning:
+#   herdr-plugin.toml is the only place that holds the version. The script
+#   copies it to CFBundleShortVersionString, and sets CFBundleVersion to the
+#   number of commits in git history (1 when git history is not available).
+#   Use scripts/release.sh to change the version.
 #
 # Requirements:
-#   Go and the Xcode Command Line Tools (swiftc).
+#   Go and the Xcode Command Line Tools (swiftc, codesign).
 #
 # Output:
-#   build/libpasteboard.a, bin/clipwatch
+#   build/libpasteboard.a, Clipwatch.app
 
 set -e
 
 cd "$(dirname "$0")"
-mkdir -p bin build
+
+APP=Clipwatch.app/Contents
+VERSION=$(sed -n 's/^version = "\(.*\)"$/\1/p' herdr-plugin.toml | head -n 1)
+BUILD=$(git rev-list --count HEAD 2>/dev/null || echo 1)
+
+if [ -z "$VERSION" ]; then
+  echo "build.sh: no version found in herdr-plugin.toml" >&2
+  exit 1
+fi
+
+mkdir -p build "$APP/MacOS" "$APP/Resources" "$APP/Library/LaunchAgents"
 
 swiftc -O -parse-as-library -emit-library -static -module-name pasteboard \
-  -o build/libpasteboard.a swift/pasteboard.swift
-go build -o bin/clipwatch .
+  -o build/libpasteboard.a swift/pasteboard.swift swift/service.swift
+go build -o "$APP/MacOS/clipwatch" .
+
+cp app/Info.plist "$APP/Info.plist"
+cp app/gusilva.clipwatch.watcher.plist "$APP/Library/LaunchAgents/"
+cp app/Clipwatch.icns "$APP/Resources/Clipwatch.icns"
+
+/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$APP/Info.plist"
+/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD" "$APP/Info.plist"
+
+codesign --force --sign - Clipwatch.app

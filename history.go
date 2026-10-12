@@ -86,19 +86,3 @@ func Load(path string) (*History, error) {
 
 	return &h, nil
 }
-
-// historyPath returns $HERDR_PLUGIN_STATE_DIR/history.json if that variable is
-// set, and os.UserConfigDir()/clipwatch/history.json otherwise.
-func historyPath() (string, error) {
-
-	if dir := os.Getenv("HERDR_PLUGIN_STATE_DIR"); dir != "" {
-		return filepath.Join(dir, "history.json"), nil
-	}
-
-	base, err := os.UserConfigDir()
-	if err != nil {
-		return "", err
-	}
-
-	return filepath.Join(base, "clipwatch", "history.json"), nil
-}
