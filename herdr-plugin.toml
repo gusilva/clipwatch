@@ -1,0 +1,32 @@
+id = "gusilva.clipwatch"
+name = "Clipwatch"
+version = "0.0.1"
+min_herdr_version = "0.9.3"
+description = "macOS clipboard history in a herdr popup"
+platforms = ["macos"]
+
+[[build]]
+command = ["./build.sh"]
+
+# Runs once each time the herdr server starts: hands the watcher to launchd, then exits.
+[[startup]]
+command = ["./bin/clipwatch", "agent"]
+
+[[actions]]
+id = "open"
+title = "Clipboard history"
+command = ["./bin/clipwatch", "open"]
+ 
+[[actions]]
+id = "remove-watcher"
+title = "Stop and remove the clipboard watcher"
+command = ["./bin/clipwatch", "agent", "remove"]
+
+[[panes]]
+id = "picker"
+title = "Clipboard"
+placement = "popup"
+width = "20%"
+height = "40%"
+command = ["./bin/clipwatch", "pick"]
+
