@@ -183,19 +183,20 @@ func (m model) reloadIfChanged() model {
 var (
 	accent   = lipgloss.Color("#89b4fa")
 	dim      = lipgloss.NewStyle().Foreground(lipgloss.Color("#7f849c"))
-	bold     = lipgloss.NewStyle().Bold(true)
-	selected = lipgloss.NewStyle().Background(lipgloss.Color("#313244"))
-	dot      = lipgloss.NewStyle().Foreground(accent).Render("●")
+	pageBg   = lipgloss.Color("#191824") // popup background, same as the herdr frame
+	selBg    = lipgloss.Color("#313244")
+	selected = lipgloss.NewStyle().Background(selBg)
+	dotStyle = lipgloss.NewStyle().Foreground(accent)
 )
 
-const rowHeight = 2 // each entry = preview line + meta line
+const rowHeight = 3 // each entry = preview line + meta line + separator rule
 
 func (m model) View() tea.View {
 	w := max(m.width, 40)
 	var b strings.Builder
 
 	// header
-	b.WriteString(spread(bold.Render("clipboard"), dim.Render(fmt.Sprintf("%d entries", len(m.entries))), w) + "\n")
+	b.WriteString(spread("", dim.Render(fmt.Sprintf("%d entries", len(m.entries))), w) + "\n")
 	b.WriteString(m.filterLine() + "\n")
 
 	// body: only the rows that fit (header 2 lines + footer 2 lines)
@@ -208,17 +209,27 @@ func (m model) View() tea.View {
 	}
 	for i := start; i < end; i++ {
 		e := vis[i]
-		mark := " "
+		// Every piece carries the background itself: a nested style ends with
+		// a reset, which would cancel an outer background.
+		fill, dimSt, dotSt := lipgloss.NewStyle(), dim, dotStyle
 		if i == m.cursor {
-			mark = dot
+			fill, dimSt, dotSt = selected, dim.Background(selBg), dotStyle.Background(selBg)
 		}
-		line1 := spread(mark+" "+preview(e.Text, w-12), dim.Render(age(time.Since(e.CopiedAt))), w)
-		line2 := "  " + dim.Render(meta(e.Text))
-		row := line1 + "\n" + padRight(line2, w)
+		mark := fill.Render(" ")
 		if i == m.cursor {
-			row = selected.Render(row)
+			mark = dotSt.Render("●")
 		}
+		left := mark + fill.Render(" "+preview(e.Text, w-12))
+		right := dimSt.Render(age(time.Since(e.CopiedAt)))
+		gap := fill.Render(strings.Repeat(" ", max(w-lipgloss.Width(left)-lipgloss.Width(right), 1)))
+		previewLine := left + gap + right
+		metaLine := fill.Render("  ") + dimSt.Render(meta(e.Text))
+		metaLine += fill.Render(strings.Repeat(" ", max(w-lipgloss.Width(metaLine), 0)))
+		row := previewLine + "\n" + metaLine
 		b.WriteString(row + "\n")
+		if i < end-1 { // faint rule between entries, not after the last
+			b.WriteString(dim.Foreground(lipgloss.Color("#45475a")).Render(strings.Repeat("─", w)) + "\n")
+		}
 	}
 
 	// footer
@@ -228,9 +239,28 @@ func (m model) View() tea.View {
 	}
 	b.WriteString("\n" + dim.Render(hint))
 
-	v := tea.NewView(b.String())
+	v := tea.NewView(paintBackground(b.String(), w, max(m.height, 1)))
 	v.AltScreen = true
+	v.BackgroundColor = pageBg
 	return v
+}
+
+// paintBackground gives every cell of a w x h screen the page background.
+// Styled pieces end with a reset, which would drop the background, so we
+// switch it back on after each reset and pad every line to the full width.
+func paintBackground(s string, w, h int) string {
+	// Render a space, keep only the "turn background on" escape before it.
+	on, _, _ := strings.Cut(lipgloss.NewStyle().Background(pageBg).Render(" "), " ")
+	lines := strings.Split(s, "\n")
+	for len(lines) < h {
+		lines = append(lines, "")
+	}
+	for i, l := range lines {
+		l = strings.ReplaceAll(l, "\x1b[m", "\x1b[m"+on)
+		l = strings.ReplaceAll(l, "\x1b[0m", "\x1b[0m"+on)
+		lines[i] = on + l + strings.Repeat(" ", max(w-lipgloss.Width(l), 0)) + "\x1b[m"
+	}
+	return strings.Join(lines, "\n")
 }
 
 // filterLine shows the input while typing, the applied query after,
@@ -250,10 +280,6 @@ func (m model) filterLine() string {
 func spread(left, right string, w int) string {
 	gap := max(w-lipgloss.Width(left)-lipgloss.Width(right), 1)
 	return left + strings.Repeat(" ", gap) + right
-}
-
-func padRight(s string, w int) string {
-	return s + strings.Repeat(" ", max(w-lipgloss.Width(s), 0))
 }
 
 // meta describes an entry for the second row: size and line count.
