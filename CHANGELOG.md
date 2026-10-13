@@ -2,6 +2,33 @@
 
 All notable changes to clipwatch. The version lives in `herdr-plugin.toml`.
 
+## 0.4.0 - 2026-10-13
+
+### Added
+
+- Picker: the bottom right corner shows 🟢 when the watcher is running
+  and 🔴 when it is not. The watcher touches a `heartbeat` file in
+  its data folder every second, and the picker shows green while the file is
+  less than 3 seconds old. It does not parse launchd output, and it also turns
+  red for a watcher that hangs.
+- Picker: the footer hint lists `/ search`.
+- `docs/instruction.md`: troubleshooting entry for a watcher that macOS
+  refuses to start after a rebuild (`OS_REASON_CODESIGNING`).
+
+### Changed
+
+- Picker: the filter moves to the top left, on the same line as the entry
+  count, with a blank line before the list.
+- Picker: the footer is pinned to the last row of the popup.
+- Picker: the filter box has no placeholder text.
+
+### Internal
+
+- `picker.go`: comments only on declarations, no inline comments. `View` and
+  `reloadIfChanged` are split into `rows`, `footer`, `renderRow`,
+  `backgroundOn`, `clearFilter`, `selectedText` and `followText`.
+- `datadir_test.go`: test for the heartbeat check.
+
 ## 0.3.1 - 2026-10-12
 
 ### Changed
