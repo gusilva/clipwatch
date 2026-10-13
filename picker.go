@@ -11,25 +11,31 @@ import (
 	"charm.land/lipgloss/v2"
 )
 
-// ---------- model: everything the picker knows ----------
-
+// model is the whole state of the picker: the history entries, the cursor, the
+// filter, and whether the watcher is alive. Its path is history.json and its
+// heartbeat is the watcher's heartbeat file. The entries are newest first, as
+// stored, and modTime is the mtime of history.json at the last load. The width
+// and height come from the terminal size. The chosen text is set on Enter, and
+// pick writes it to the clipboard after the UI has quit. While filtering is
+// true, keys are typed into the query, which filters the list in both modes.
 type model struct {
-	path      string    // history.json
-	entries   []Entry   // newest first, as stored
-	modTime   time.Time // file mtime at last load (for reload)
-	cursor    int       // index of the highlighted entry
-	width     int       // terminal size, from WindowSizeMsg
+	path      string
+	heartbeat string
+	entries   []Entry
+	modTime   time.Time
+	cursor    int
+	width     int
 	height    int
-	chosen    string          // set on Enter; main writes it to the clipboard AFTER we quit
-	filtering bool            // MODE: true while typing in the filter box
-	query     textinput.Model // the filter text; applied in both modes
+	chosen    string
+	filtering bool
+	query     textinput.Model
+	watching  bool
 }
 
 // newModel builds a picker with an empty filter box.
 func newModel(path string) model {
 	q := textinput.New()
 	q.Prompt = "/"
-	q.Placeholder = "filter"
 	return model{path: path, query: q}
 }
 
@@ -40,49 +46,56 @@ func (m model) visible() []Entry {
 	if q == "" {
 		return m.entries
 	}
+
 	var out []Entry
 	for _, e := range m.entries {
 		if strings.Contains(strings.ToLower(e.Text), q) {
 			out = append(out, e)
 		}
 	}
+
 	return out
 }
 
-// tickMsg arrives once per second; we use it to notice file changes.
+// tickMsg arrives once per second, to notice file changes and the heartbeat.
 type tickMsg time.Time
 
+// tick schedules the next tickMsg.
 func tick() tea.Cmd {
 	return tea.Tick(time.Second, func(t time.Time) tea.Msg { return tickMsg(t) })
 }
 
+// Init starts the tick loop.
 func (m model) Init() tea.Cmd { return tick() }
 
-// ---------- update: message in, new model out (no side effects) ----------
-
+// Update handles window size and ticks in every mode, and sends everything
+// else to the handler of the current mode.
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	// 1. Messages that mean the same thing in every mode.
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		return m, nil
 	case tickMsg:
 		m = m.reloadIfChanged()
+		m.watching = watcherAlive(m.heartbeat, time.Now())
 		return m, tick()
 	}
-	// 2. Everything else depends on the mode.
+
 	if m.filtering {
 		return m.updateFiltering(msg)
 	}
+
 	return m.updateBrowsing(msg)
 }
 
-// updateBrowsing: keys are commands (j moves, / starts filtering, ⏎ copies).
+// updateBrowsing handles keys as commands: j moves, / starts filtering, and
+// Enter copies. The first Esc clears an applied filter, and the next one quits.
 func (m model) updateBrowsing(msg tea.Msg) (tea.Model, tea.Cmd) {
 	key, ok := msg.(tea.KeyPressMsg)
 	if !ok {
 		return m, nil
 	}
+
 	n := len(m.visible())
 	switch key.String() {
 	case "up", "k":
@@ -95,149 +108,142 @@ func (m model) updateBrowsing(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case "/":
 		m.filtering = true
-		return m, m.query.Focus() // Focus returns a Cmd (cursor blink)
+		return m, m.query.Focus()
 	case "enter":
 		if n > 0 {
 			m.chosen = m.visible()[m.cursor].Text
 		}
+
 		return m, tea.Quit
 	case "esc":
-		if m.query.Value() != "" { // first esc clears an applied filter
-			m.query.Reset()
-			m.cursor = 0
-			return m, nil
+		if m.query.Value() != "" {
+			return m.clearFilter(), nil
 		}
+
 		return m, tea.Quit
 	case "q", "ctrl+c":
 		return m, tea.Quit
 	}
+
 	return m, nil
 }
 
-// updateFiltering: keys are TEXT (j types "j"), except a few control keys.
+// updateFiltering handles keys as text: j types "j". Enter keeps the filter
+// and Esc drops it, and both go back to browsing. The arrows still move,
+// because they cannot be typed. A change of the text sends the cursor to the top.
 func (m model) updateFiltering(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if key, ok := msg.(tea.KeyPressMsg); ok {
 		switch key.String() {
-		case "enter": // keep the filter, go back to browsing
+		case "enter":
 			m.filtering = false
 			m.query.Blur()
 			return m, nil
-		case "esc": // drop the filter, go back to browsing
+		case "esc":
 			m.filtering = false
 			m.query.Blur()
-			m.query.Reset()
-			m.cursor = 0
-			return m, nil
-		case "up", "down": // arrows still move: they can't be typed anyway
+			return m.clearFilter(), nil
+		case "up", "down":
 			return m.updateBrowsing(msg)
 		case "ctrl+c":
 			return m, tea.Quit
 		}
 	}
-	// Anything else goes to the text input; if the text changed, restart at the top.
+
 	before := m.query.Value()
 	var cmd tea.Cmd
 	m.query, cmd = m.query.Update(msg)
 	if m.query.Value() != before {
 		m.cursor = 0
 	}
+
 	return m, cmd
 }
 
-// reloadIfChanged re-reads history.json when its mtime moved (the watcher saved).
-// Same idea as changeCount: poll something cheap, read the content only on change.
+// clearFilter empties the filter text and puts the cursor on the first entry.
+func (m model) clearFilter() model {
+	m.query.Reset()
+	m.cursor = 0
+	return m
+}
+
+// reloadIfChanged re-reads history.json when its mtime moved, which means the
+// watcher saved. It polls something cheap and reads the content only on change.
+// The cursor follows the selected text to its new position.
 func (m model) reloadIfChanged() model {
 	info, err := os.Stat(m.path)
 	if err != nil || info.ModTime().Equal(m.modTime) {
 		return m
 	}
+
 	h, err := Load(m.path)
 	if err != nil {
 		return m
 	}
 
-	// 1. Remember WHAT is selected before the list changes under us.
-	var selected string
-	if vis := m.visible(); m.cursor < len(vis) {
-		selected = vis[m.cursor].Text
+	selected := m.selectedText()
+	m.entries, m.modTime = h.Entries, info.ModTime()
+	return m.followText(selected)
+}
+
+// selectedText returns the text under the cursor, or "" when the list is empty.
+func (m model) selectedText() string {
+	vis := m.visible()
+	if m.cursor >= len(vis) {
+		return ""
 	}
 
-	// 2. Swap in the new list.
-	m.entries, m.modTime = h.Entries, info.ModTime()
+	return vis[m.cursor].Text
+}
 
-	// 3. Follow that text to its new position.
+// followText moves the cursor to the entry with the given text. When that
+// entry is gone, or nothing was selected, the cursor stays where it was but
+// inside the list.
+func (m model) followText(text string) model {
 	for i, e := range m.visible() {
-		if e.Text == selected {
+		if e.Text == text {
 			m.cursor = i
 			return m
 		}
 	}
 
-	// 4. It's gone (or nothing was selected): stay put, but inside the list.
 	m.cursor = min(m.cursor, max(len(m.visible())-1, 0))
 	return m
 }
 
-// ---------- view: model in, screen out ----------
-
+// Colours of the picker. pageBg is the popup background, the same as the herdr
+// frame, and selBg is the background of the highlighted entry.
 var (
 	accent   = lipgloss.Color("#89b4fa")
 	dim      = lipgloss.NewStyle().Foreground(lipgloss.Color("#7f849c"))
-	pageBg   = lipgloss.Color("#191824") // popup background, same as the herdr frame
+	pageBg   = lipgloss.Color("#191824")
 	selBg    = lipgloss.Color("#313244")
 	selected = lipgloss.NewStyle().Background(selBg)
 	dotStyle = lipgloss.NewStyle().Foreground(accent)
+	ruleText = dim.Foreground(lipgloss.Color("#45475a"))
 )
 
-const rowHeight = 3 // each entry = preview line + meta line + separator rule
+// rowHeight is the lines per entry: the preview line, the meta line and the
+// separator rule.
+const rowHeight = 3
 
+// chromeHeight is the lines around the list: two for the header with its blank
+// line, and two for the footer with its blank line.
+const chromeHeight = 4
+
+// hint lists the keys in browsing mode.
+const hint = "↑/k ↓/j move · / search · ⏎ copy · esc close"
+
+// View draws the header, the visible rows, and the footer, which is pinned to
+// the last row of the screen. Only the rows that fit are drawn, and the list
+// scrolls so that the cursor stays on screen.
 func (m model) View() tea.View {
 	w := max(m.width, 40)
 	var b strings.Builder
 
-	// header
-	b.WriteString(spread("", dim.Render(fmt.Sprintf("%d entries", len(m.entries))), w) + "\n")
-	b.WriteString(m.filterLine() + "\n")
-
-	// body: only the rows that fit (header 2 lines + footer 2 lines)
-	vis := m.visible()
-	perPage := max((m.height-4)/rowHeight, 1)
-	start := max(0, m.cursor-perPage+1) // scroll so the cursor stays on screen
-	end := min(len(vis), start+perPage)
-	if len(vis) == 0 {
-		b.WriteString(dim.Render("nothing yet — copy something") + "\n")
-	}
-	for i := start; i < end; i++ {
-		e := vis[i]
-		// Every piece carries the background itself: a nested style ends with
-		// a reset, which would cancel an outer background.
-		fill, dimSt, dotSt := lipgloss.NewStyle(), dim, dotStyle
-		if i == m.cursor {
-			fill, dimSt, dotSt = selected, dim.Background(selBg), dotStyle.Background(selBg)
-		}
-		mark := fill.Render(" ")
-		if i == m.cursor {
-			mark = dotSt.Render("●")
-		}
-		left := mark + fill.Render(" "+preview(e.Text, w-12))
-		right := dimSt.Render(age(time.Since(e.CopiedAt)))
-		gap := fill.Render(strings.Repeat(" ", max(w-lipgloss.Width(left)-lipgloss.Width(right), 1)))
-		previewLine := left + gap + right
-		metaLine := fill.Render("  ") + dimSt.Render(meta(e.Text))
-		metaLine += fill.Render(strings.Repeat(" ", max(w-lipgloss.Width(metaLine), 0)))
-		row := previewLine + "\n" + metaLine
-		b.WriteString(row + "\n")
-		if i < end-1 { // faint rule between entries, not after the last
-			b.WriteString(dim.Foreground(lipgloss.Color("#45475a")).Render(strings.Repeat("─", w)) + "\n")
-		}
-	}
-
-	// footer
-	hint := "↑/k ↓/j move · ⏎ copy · esc close"
-	if m.filtering {
-		hint = "type to filter · ↑↓ move · ⏎ apply · esc clear"
-	}
-	b.WriteString("\n" + dim.Render(hint))
+	count := dim.Render(fmt.Sprintf("%d entries", len(m.entries)))
+	b.WriteString(spread(m.filterLine(), count, w) + "\n\n")
+	b.WriteString(m.rows(w))
+	b.WriteString(m.footer(strings.Count(b.String(), "\n"), w))
 
 	v := tea.NewView(paintBackground(b.String(), w, max(m.height, 1)))
 	v.AltScreen = true
@@ -245,22 +251,85 @@ func (m model) View() tea.View {
 	return v
 }
 
+// rows renders the entries that fit on the screen, one rowHeight block each,
+// with a rule between entries and none after the last. It renders a hint when
+// the list is empty.
+func (m model) rows(w int) string {
+	vis := m.visible()
+	if len(vis) == 0 {
+		return dim.Render("nothing yet — copy something") + "\n"
+	}
+
+	perPage := max((m.height-chromeHeight)/rowHeight, 1)
+	start := max(0, m.cursor-perPage+1)
+	end := min(len(vis), start+perPage)
+
+	var b strings.Builder
+	for i := start; i < end; i++ {
+		b.WriteString(renderRow(vis[i], i == m.cursor, w) + "\n")
+		if i < end-1 {
+			b.WriteString(ruleText.Render(strings.Repeat("─", w)) + "\n")
+		}
+	}
+
+	return b.String()
+}
+
+// footer renders the key hints with the watcher indicator at the right. The
+// used lines already filled by the header and the rows are padded with blank
+// lines, at least one, so that the footer lands on the last row of the screen.
+func (m model) footer(used, w int) string {
+	gap := max(m.height-used-1, 1)
+	return strings.Repeat("\n", gap) + spread(dim.Render(hint), watchIndicator(m.watching), w)
+}
+
+// renderRow renders one entry as a preview line with its age, and a meta line.
+// A highlighted entry gets the selection background across the whole row. Every
+// piece carries that background itself, because a nested style ends with a
+// reset, which would cancel an outer background.
+func renderRow(e Entry, highlighted bool, w int) string {
+	fill, dimSt := lipgloss.NewStyle(), dim
+	mark := fill.Render(" ")
+	if highlighted {
+		fill, dimSt = selected, dim.Background(selBg)
+		mark = dotStyle.Background(selBg).Render("●")
+	}
+
+	left := mark + fill.Render(" "+preview(e.Text, w-12))
+	right := dimSt.Render(age(time.Since(e.CopiedAt)))
+	gap := fill.Render(strings.Repeat(" ", max(w-lipgloss.Width(left)-lipgloss.Width(right), 1)))
+
+	metaLine := fill.Render("  ") + dimSt.Render(meta(e.Text))
+	metaLine += fill.Render(strings.Repeat(" ", max(w-lipgloss.Width(metaLine), 0)))
+
+	return left + gap + right + "\n" + metaLine
+}
+
 // paintBackground gives every cell of a w x h screen the page background.
-// Styled pieces end with a reset, which would drop the background, so we
-// switch it back on after each reset and pad every line to the full width.
+// Styled pieces end with a reset, which would drop the background, so it
+// switches the background back on after each reset and pads every line to the
+// full width.
 func paintBackground(s string, w, h int) string {
-	// Render a space, keep only the "turn background on" escape before it.
-	on, _, _ := strings.Cut(lipgloss.NewStyle().Background(pageBg).Render(" "), " ")
+	on := backgroundOn()
 	lines := strings.Split(s, "\n")
 	for len(lines) < h {
 		lines = append(lines, "")
 	}
+
 	for i, l := range lines {
 		l = strings.ReplaceAll(l, "\x1b[m", "\x1b[m"+on)
 		l = strings.ReplaceAll(l, "\x1b[0m", "\x1b[0m"+on)
 		lines[i] = on + l + strings.Repeat(" ", max(w-lipgloss.Width(l), 0)) + "\x1b[m"
 	}
+
 	return strings.Join(lines, "\n")
+}
+
+// backgroundOn returns the escape sequence that turns the page background on.
+// It renders a space with that background and keeps what comes before the space.
+func backgroundOn() string {
+	on, _, _ := strings.Cut(lipgloss.NewStyle().Background(pageBg).Render(" "), " ")
+	return on
 }
 
 // filterLine shows the input while typing, the applied query after,
@@ -274,6 +343,17 @@ func (m model) filterLine() string {
 	default:
 		return ""
 	}
+}
+
+// watchIndicator is the footer badge at the bottom right: a green circle when
+// the watcher runs, and a red circle when not. It is only the emoji, so it fits
+// next to the key hints in a narrow popup.
+func watchIndicator(watching bool) string {
+	if watching {
+		return "\U0001F7E2"
+	}
+
+	return "\U0001F534"
 }
 
 // spread puts left at the start and right at the end of a line of width w.
@@ -305,19 +385,28 @@ func age(d time.Duration) string {
 	}
 }
 
-// ---------- entry point: run the UI, then do the side effect ----------
-
+// pick runs the picker UI, and then, if an entry was chosen, writes it to the
+// clipboard. The write happens after the UI has quit.
 func pick() {
 	path, err := historyPath()
 	if err != nil {
 		fatal("error", "err", err)
 	}
-	m := newModel(path).reloadIfChanged() // first load
+
+	beat, err := heartbeatPath()
+	if err != nil {
+		fatal("error", "err", err)
+	}
+
+	m := newModel(path).reloadIfChanged()
+	m.heartbeat = beat
+	m.watching = watcherAlive(beat, time.Now())
 
 	final, err := tea.NewProgram(m).Run()
 	if err != nil {
 		fatal("error", "err", err)
 	}
+
 	if text := final.(model).chosen; text != "" {
 		if _, err := writeString(text); err != nil {
 			fatal("error", "err", err)
