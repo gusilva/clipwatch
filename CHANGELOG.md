@@ -2,7 +2,7 @@
 
 All notable changes to clipwatch. The version lives in `herdr-plugin.toml`.
 
-## 0.4.0 - 2026-10-13
+## v0.4.0 - 2026-10-13
 
 ### Added
 
