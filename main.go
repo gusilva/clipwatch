@@ -30,6 +30,21 @@ func shouldSkip() (string, bool) {
 	return "", false
 }
 
+// keepHeartbeat touches the heartbeat file at path every heartbeatEvery, so
+// the picker can tell that the watcher is alive. It logs a failure once, and
+// logs again after the next success followed by a new failure.
+func keepHeartbeat(path string) {
+	failed := false
+	for now := range time.Tick(heartbeatEvery) {
+		err := touchHeartbeat(path, now)
+		if err != nil && !failed {
+			slog.Error("heartbeat failed", "err", err)
+		}
+
+		failed = err != nil
+	}
+}
+
 // watch polls the clipboard and records new text clips in the history file. It
 // runs until the process is stopped.
 func watch() {
@@ -50,6 +65,13 @@ func watch() {
 	}
 	defer func() { _ = logf.Close() }()
 	slog.SetDefault(slog.New(slog.NewTextHandler(io.MultiWriter(os.Stderr, logf), nil)))
+
+	beat, err := heartbeatPath()
+	if err != nil {
+		fatal("error", "err", err)
+	}
+
+	go keepHeartbeat(beat)
 
 	last := changeCount()
 

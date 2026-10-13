@@ -18,7 +18,7 @@ Clipwatch.app/
 
 The bundle is needed because macOS registers the watcher with `SMAppService`, and that only works for a binary inside an app. `Clipwatch.app/` and `build/` are build output and are in `.gitignore`.
 
-Runtime files are in `~/Library/Application Support/clipwatch/`: `history.json` and `watch.log`.
+Runtime files are in `~/Library/Application Support/clipwatch/`: `history.json`, `watch.log` and `heartbeat`. The watcher touches `heartbeat` every second, and the picker shows 🟢 when it is less than 3 seconds old and 🔴 otherwise. It does not depend on launchd or its output format.
 
 ## 2. Build and launch locally
 
@@ -157,6 +157,23 @@ You (or macOS) turned the Clipwatch background item off. Switch it on under **Sy
 
 **Clipwatch is missing from Login Items, or has no name or icon**
 Check that `Clipwatch.app/Contents/Info.plist` and `Resources/Clipwatch.icns` exist (rebuild if not). Then run `clipwatch agent remove` and `clipwatch agent` to register it again.
+
+**The 🔴 in the picker, or `state = spawn scheduled` and a huge `runs` count**
+The watcher is registered but macOS refuses to start it. `launchctl print` shows `last exit code = 78: EX_CONFIG` or `last exit reason = OS_REASON_CODESIGNING`, and `watch.log` stops growing. Running `clipwatch watch` by hand works. To see the reason:
+
+```sh
+log show --last 2m --predicate 'process == "launchd"' | grep -i clipwatch
+```
+
+A line with `OS_REASON_CODESIGNING | Launch Constraint Violation` is this problem. It came back after each `./build.sh` or `scripts/check.sh`, which sign the bundle again. Restarting with `agent` was not enough. Registering again fixed it:
+
+```sh
+CW=./Clipwatch.app/Contents/MacOS/clipwatch
+$CW agent remove
+$CW agent
+```
+
+Then check that `state = running`. The first time, `xattr -cr Clipwatch.app` and `codesign --force --sign - Clipwatch.app` were run between the two commands. The second time, those two alone did not help, but `agent remove` followed by `agent` did. Why macOS refuses the rebuilt bundle was not found.
 
 **Popup is empty or history is not growing**
 

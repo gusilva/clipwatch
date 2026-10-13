@@ -23,6 +23,9 @@ var MaxEntries = 100
 // MaxEntryBytes is the largest clip we record (64 KB). Bigger clips are skipped.
 const MaxEntryBytes = 64 * 1024
 
+// Add records text as the newest entry, moving it up if it is already in the
+// history, and keeps at most MaxEntries. It returns false, and records nothing,
+// for empty text or text over MaxEntryBytes.
 func (h *History) Add(text string, now time.Time) bool {
 	if len(text) > MaxEntryBytes || strings.TrimSpace(text) == "" {
 		return false
@@ -30,7 +33,7 @@ func (h *History) Add(text string, now time.Time) bool {
 
 	for i, e := range h.Entries {
 		if e.Text == text {
-			h.Entries = append(h.Entries[:i], h.Entries[i+1:]...) // remoce old position
+			h.Entries = append(h.Entries[:i], h.Entries[i+1:]...)
 			break
 		}
 	}

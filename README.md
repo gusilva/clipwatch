@@ -21,7 +21,7 @@
 ## Features
 
 - **Recent history**: keeps your last 100 copied texts.
-- **Quick picker**: open it with one key from any herdr session, then choose an entry to put it back on the clipboard.
+- **Quick picker**: open it with one key from any herdr session, then choose an entry to put it back on the clipboard. The bottom right corner shows 🟢 when the watcher is running and 🔴 when it is not.
 - **Privacy aware**: skips anything marked as concealed or transient by the source app, such as password managers ([nspasteboard.org](http://nspasteboard.org) markers).
 - **Always on**: the watcher is a background item of `Clipwatch.app`, so it keeps recording after herdr closes. It shows up in Login Items with its own name and icon.
 - **Light**: polls the clipboard every 300 ms, and never copies oversized entries into memory.
