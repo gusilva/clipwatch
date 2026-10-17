@@ -98,3 +98,51 @@ func TestAge(t *testing.T) {
 		}
 	}
 }
+
+func ctrl(code rune) tea.KeyPressMsg {
+	return tea.KeyPressMsg{Code: code, Mod: tea.ModCtrl}
+}
+
+func TestCtrlDigitCopiesRow(t *testing.T) {
+	m, cmd := send(threeEntries(), ctrl('2'))
+	if m.chosen != "beta" || cmd == nil {
+		t.Fatalf("⌃2: want chosen beta and quit, got %q", m.chosen)
+	}
+}
+
+func TestCtrlZeroIsTenthRow(t *testing.T) {
+	m := model{}
+	for i := 0; i < 12; i++ {
+		m.entries = append(m.entries, Entry{Text: string(rune('a' + i))})
+	}
+	m, _ = send(m, ctrl('0'))
+	if m.chosen != "j" {
+		t.Fatalf("⌃0: want tenth row j, got %q", m.chosen)
+	}
+}
+
+func TestCtrlDigitMissingRowDoesNothing(t *testing.T) {
+	m, cmd := send(threeEntries(), ctrl('9'))
+	if m.chosen != "" || cmd != nil {
+		t.Fatalf("⌃9 on 3 rows: want nothing, got %q", m.chosen)
+	}
+}
+
+func TestCtrlDigitWhileFiltering(t *testing.T) {
+	m := threeEntries()
+	m.query.SetValue("a")
+	m.filtering = true
+	m, _ = send(m, ctrl('2'))
+	if m.chosen != "beta" {
+		t.Fatalf("⌃2 on filtered [alpha beta gamma]: want beta, got %q", m.chosen)
+	}
+}
+
+func TestShortcutLabels(t *testing.T) {
+	cases := map[int]string{0: "⌃1", 1: "⌃2", 8: "⌃9", 9: "⌃0", 10: ""}
+	for idx, want := range cases {
+		if got := shortcutLabel(idx); got != want {
+			t.Fatalf("row %d: want %q, got %q", idx, want, got)
+		}
+	}
+}

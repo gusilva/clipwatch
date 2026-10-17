@@ -2,6 +2,24 @@
 
 All notable changes to clipwatch. The version lives in `herdr-plugin.toml`.
 
+## v0.5.0 - 2026-10-17
+
+### Added
+
+- Picker: `ctrl+1` to `ctrl+9` copy rows 1 to 9, and `ctrl+0` copies row 10.
+  The key follows the row's place in the list, so `ctrl+2` always copies the
+  second row. It works while the filter box is open, and it does nothing when
+  the row does not exist. Ghostty and herdr do not pass `⌘+digit` to the
+  program, so the shortcut uses Ctrl.
+- Picker: each of the first ten rows shows its key (`⌃1` to `⌃0`) in place of
+  the selection dot. The footer hint lists `⌃1-0 copy row`.
+
+### Changed
+
+- Picker: the selected row is marked only by its background, because the dot
+  is gone.
+- Plugin: the picker popup is 40% wide instead of 20%.
+
 ## v0.4.0 - 2026-10-13
 
 ### Added

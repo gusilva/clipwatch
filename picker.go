@@ -81,11 +81,51 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tick()
 	}
 
+	if k, ok := msg.(tea.KeyPressMsg); ok {
+		if i, ok := shortcutIndex(k); ok {
+			return m.choose(i)
+		}
+	}
+
 	if m.filtering {
 		return m.updateFiltering(msg)
 	}
 
 	return m.updateBrowsing(msg)
+}
+
+// shortcutRows is how many rows have a shortcut: ctrl+1 to ctrl+9, then ctrl+0.
+const shortcutRows = 10
+
+// shortcutIndex maps ctrl+1…ctrl+9 to rows 0…8 and ctrl+0 to row 9. It works in both
+// modes, because a key with ctrl+digit cannot be typed as text.
+func shortcutIndex(k tea.KeyPressMsg) (int, bool) {
+	if k.Mod&tea.ModCtrl == 0 || k.Code < '0' || k.Code > '9' {
+		return 0, false
+	}
+
+	return (int(k.Code-'0') + shortcutRows - 1) % shortcutRows, true
+}
+
+// shortcutLabel is the label of row i, like "⌃1", and "" for rows without one.
+func shortcutLabel(i int) string {
+	if i < 0 || i >= shortcutRows {
+		return ""
+	}
+
+	return fmt.Sprintf("⌃%d", (i+1)%shortcutRows)
+}
+
+// choose copies row i of the visible list and quits. It does nothing when the
+// row does not exist.
+func (m model) choose(i int) (tea.Model, tea.Cmd) {
+	vis := m.visible()
+	if i >= len(vis) {
+		return m, nil
+	}
+
+	m.cursor, m.chosen = i, vis[i].Text
+	return m, tea.Quit
 }
 
 // updateBrowsing handles keys as commands: j moves, / starts filtering, and
@@ -213,13 +253,13 @@ func (m model) followText(text string) model {
 // Colours of the picker. pageBg is the popup background, the same as the herdr
 // frame, and selBg is the background of the highlighted entry.
 var (
-	accent   = lipgloss.Color("#89b4fa")
-	dim      = lipgloss.NewStyle().Foreground(lipgloss.Color("#7f849c"))
-	pageBg   = lipgloss.Color("#191824")
-	selBg    = lipgloss.Color("#313244")
-	selected = lipgloss.NewStyle().Background(selBg)
-	dotStyle = lipgloss.NewStyle().Foreground(accent)
-	ruleText = dim.Foreground(lipgloss.Color("#45475a"))
+	accent     = lipgloss.Color("#89b4fa")
+	dim        = lipgloss.NewStyle().Foreground(lipgloss.Color("#7f849c"))
+	pageBg     = lipgloss.Color("#191824")
+	selBg      = lipgloss.Color("#313244")
+	selected   = lipgloss.NewStyle().Background(selBg)
+	labelStyle = lipgloss.NewStyle().Foreground(accent)
+	ruleText   = dim.Foreground(lipgloss.Color("#45475a"))
 )
 
 // rowHeight is the lines per entry: the preview line, the meta line and the
@@ -231,7 +271,7 @@ const rowHeight = 3
 const chromeHeight = 4
 
 // hint lists the keys in browsing mode.
-const hint = "↑/k ↓/j move · / search · ⏎ copy · esc close"
+const hint = "↑/k ↓/j move · / search · ⏎ copy · ⌃1-0 copy row · esc close"
 
 // View draws the header, the visible rows, and the footer, which is pinned to
 // the last row of the screen. Only the rows that fit are drawn, and the list
@@ -266,7 +306,7 @@ func (m model) rows(w int) string {
 
 	var b strings.Builder
 	for i := start; i < end; i++ {
-		b.WriteString(renderRow(vis[i], i == m.cursor, w) + "\n")
+		b.WriteString(renderRow(vis[i], shortcutLabel(i), i == m.cursor, w) + "\n")
 		if i < end-1 {
 			b.WriteString(ruleText.Render(strings.Repeat("─", w)) + "\n")
 		}
@@ -284,18 +324,22 @@ func (m model) footer(used, w int) string {
 }
 
 // renderRow renders one entry as a preview line with its age, and a meta line.
+// The label ("⌃1") takes the place of the marker; rows without one get blanks.
 // A highlighted entry gets the selection background across the whole row. Every
 // piece carries that background itself, because a nested style ends with a
 // reset, which would cancel an outer background.
-func renderRow(e Entry, highlighted bool, w int) string {
+func renderRow(e Entry, label string, highlighted bool, w int) string {
 	fill, dimSt := lipgloss.NewStyle(), dim
-	mark := fill.Render(" ")
 	if highlighted {
 		fill, dimSt = selected, dim.Background(selBg)
-		mark = dotStyle.Background(selBg).Render("●")
 	}
 
-	left := mark + fill.Render(" "+preview(e.Text, w-12))
+	mark := fill.Render("  ")
+	if label != "" {
+		mark = labelStyle.Background(fill.GetBackground()).Render(label)
+	}
+
+	left := fill.Render(" ") + mark + fill.Render(" "+preview(e.Text, w-15))
 	right := dimSt.Render(age(time.Since(e.CopiedAt)))
 	gap := fill.Render(strings.Repeat(" ", max(w-lipgloss.Width(left)-lipgloss.Width(right), 1)))
 
