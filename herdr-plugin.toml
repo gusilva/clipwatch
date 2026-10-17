@@ -31,6 +31,6 @@ command = ["./Clipwatch.app/Contents/MacOS/clipwatch", "agent", "remove"]
 id = "picker"
 title = "Clipboard"
 placement = "popup"
-width = "20%"
+width = "40%"
 height = "40%"
 command = ["./Clipwatch.app/Contents/MacOS/clipwatch", "pick"]
